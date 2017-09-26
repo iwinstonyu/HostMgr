@@ -22,6 +22,7 @@
 #pragma once
 
 #include <boost/asio.hpp>
+#include <json/json.h>
 #include <deque>
 #include <Base/Msg.h>
 #include <Base/Util.h>
@@ -33,18 +34,28 @@ using namespace std;
 
 class Client {
 public:
-	Client(boost::asio::io_service& io_service, tcp::resolver::iterator endpoint_iterator, int clientId)
+	Client(boost::asio::io_service& io_service, tcp::resolver::iterator endpoint_iterator, string user, string pwd)
 		: io_service_(io_service)
 		, socket_(io_service)
-		, clientId_(clientId)
 		, online_(false)
+		, connecting_(false)
+		, user_(user)
+		, pwd_(pwd)
+		, validate_(false)
 	{
 		ConnectServer(endpoint_iterator);
 	}
 
 	bool Online() { return online_; }
+	bool Validate() { return validate_; }
 
 	void SendMsg(const Msg& msg) {
+		if (!connecting_) {
+			LogSave("SendMsg not connecting");
+			return;
+		}
+
+		LogSave("SendMsg:%s", msg.Body());
 		io_service_.post([this, msg](){
 			outMsgs_.push_back(msg);
 			if (outMsgs_.size() == 1) {
@@ -56,15 +67,32 @@ public:
 	void Logout() {
 		LogSave("Client[%d] logout...", clientId_);
 		io_service_.post([this]() { socket_.close(); });
+		online_ = false;
+		connecting_ = false;
 	}
 
 private:
 	void ConnectServer(tcp::resolver::iterator endpoint_iterator) {
-		LogSave("Client[%d] conecting...", clientId_);
+		LogSave("Connecting server...");
 		boost::asio::async_connect(socket_, endpoint_iterator, 
 			[this](boost::system::error_code ec, tcp::resolver::iterator) {
 			if (!ec) {
-				online_ = true;
+				connecting_ = true;
+				LogSave("Validate user...");
+				
+				Json::Value valUser;
+				valUser["msgType"] = Msg::MSG_TYPE_LOGIN;
+				valUser["user"] = user_;
+				valUser["pwd"] = pwd_;
+				Json::FastWriter writer;
+				string strMsgBody = writer.write(valUser);
+				
+				Msg msg;
+				msg.SetBodyLength(strMsgBody.length());
+				memcpy(msg.Body(), strMsgBody.c_str(), msg.BodyLength());
+				msg.EncodeHeader();
+				SendMsg(msg);
+
 				ReadMsgHeader();
 			}
 		});
@@ -87,7 +115,26 @@ private:
 		boost::asio::async_read(socket_, boost::asio::buffer(inMsg_.Body(), inMsg_.BodyLength()),
 			[this](boost::system::error_code ec, size_t length) {
 			if (!ec) {
-				LogSave("%s", inMsg_.Body());
+				LogSave("ReadMsg: %s", inMsg_.Body());
+
+				Json::Value valMsg;
+				Json::Reader reader;
+				if (!reader.parse(inMsg_.Body(), inMsg_.Body() + inMsg_.BodyLength(), valMsg)) {
+					LogSave("ReadMsg fail parse: %s", inMsg_.Body());
+					socket_.close();
+				}
+
+				if (valMsg["msgType"] == Msg::MSG_TYPE_LOGIN_ACK) {
+					if (valMsg["result"] == 0) {
+						validate_ = true;
+						LogSave("Login succ");
+					}
+					else {
+						LogSave("Fail validate user");
+						socket_.close();
+					}
+				}
+
 				ReadMsgHeader();
 			}
 			else {
@@ -117,6 +164,10 @@ private:
 	deque<Msg> outMsgs_;
 	int clientId_;
 	bool online_;
+	bool connecting_;
+	bool validate_;
+	string user_;
+	string pwd_;
 };
 
 } // namespace wind

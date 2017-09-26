@@ -27,6 +27,11 @@ class Msg {
 public:
 	enum { HEADER_LENGTH = 4 };
 	enum { MAX_BODY_LENGTH = 512 };
+	enum {
+		MSG_TYPE_LOGIN = 1,
+		MSG_TYPE_LOGIN_ACK = 2,
+		MSG_TYPE_RESTART_WILD = 3,
+	};
 
 	Msg() : bodyLength_(0) { memset(data_, 0, sizeof(data_)); }
 

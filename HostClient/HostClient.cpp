@@ -6,6 +6,7 @@
 
 #include <iostream>
 #include <boost/asio.hpp>
+#include <json/json.h>
 #include <thread>
 #include <fstream>	// ifstream
 #include <sstream>
@@ -14,35 +15,76 @@
 using namespace std;
 using namespace wind;
 
-#define EQ_LINE_SEPARATOR "=================================================="
+void PrintUsage() {
+	cout << "usage: HostClient.exe [host] [port] [user]" << endl;
+}
 
-struct SHostInfo {
-	SHostInfo(int id, string ip, string port, string info) 
-		: id_(id), ip_(ip), port_(port), info_(info) {}
+void PrintHelp() {
+	cout << "Enter number to choose operation" << endl;
+	cout << "1: restart wild" << endl;
+}
 
-	int id_;
-	string ip_;
-	string port_;
-	string info_;
-};
-map<int, SHostInfo> hosts;
+int main(int argc, char *argv[])
+{
+	if (argc < 4) {
+		PrintUsage();
+		return 0;
+	}
 
+	string host = argv[1];
+	string port = argv[2];
+	string user = argv[3];
 
-void ForkClient(int clientId) {
-	// 每个线程初始化种子
-	srand(static_cast<int>(::time(nullptr)) + clientId);
+	if (host.empty() || port.empty() || user.empty()) {
+		PrintUsage();
+		return 0;
+	}
+
+	cout << "Enter password: ";
+
+	string pwd;
+	int c;
+	while ((c=_getch()) != EOF ) {
+		if (c == '\r') {
+			cout << endl;
+			break;
+		}
+		pwd += char(c);
+	}
+
+	if (pwd.empty()) {
+		PrintUsage();
+		return 0;
+	}
 
 	try {
 		boost::asio::io_service io_service;
 
 		tcp::resolver resovler(io_service);
-		auto endpoint_iterator = resovler.resolve({ "localhost", "13579" });
-		Client client(io_service, endpoint_iterator, clientId);
+		auto endpoint_iterator = resovler.resolve({ host, port });
+		Client client(io_service, endpoint_iterator, user, pwd);
 
-		io_service.run();
+		std::thread t([&io_service]() { io_service.run(); });
 
-		// 		std::thread t([&io_service]() { io_service.run(); });
-		// 		t.join();
+		while (true) {
+			LogSave("Waiting response...");
+			Sleep(1000);
+
+			if (client.Validate())
+				break;
+		}
+
+		PrintHelp();
+
+		int opt;
+		while (true) {
+			cin >> opt;
+			switch (opt)
+			{
+			case 1:
+				
+			}
+		}
 
 		// 		char szContent[Msg::MAX_BODY_LENGTH + 1] = "";
 		// 		while (std::cin.getline(szContent, Msg::MAX_BODY_LENGTH + 1)) {
@@ -72,74 +114,12 @@ void ForkClient(int clientId) {
 		// 				break;
 		// 			}
 		// 		}
+
+		client.Logout();
+		t.join();
 	}
 	catch (std::exception& e) {
-		cout << "Exception: " << e.what() << endl;
-	}
-}
-
-void WaitAMoment() {
-
-	vector<thread> clients;
-	clients.reserve(500);
-	for (int i = 0; i < 1; ++i) {
-		clients.emplace_back(ForkClient, i);
-	}
-
-	// 	map<int, ostringstream> ossMap;
-	// 	auto& oss1 = ossMap[1];
-	// 	auto& oss2 = ossMap[2];
-	// 	auto& oss3 = ossMap[3];
-	// 	std::thread t1([&oss1]() {RandContent(1, oss1); });
-	// 	std::thread t2([&oss2]() {RandContent(2, oss2); });
-	// 	std::thread t3([&oss3]() {RandContent(3, oss3); });
-
-	// 	for (int i = 0; i < 3; ++i) {
-	// 		auto& oss = ossMap[i];
-	// 	}
-
-	// 	for (int i = 0; i < 100; ++i) {
-	// 		int nRand = (rand() + time(nullptr)) % gContents.size();
-	// 		cout << gContents[nRand] << endl;
-	// 	}
-
-	for_each(clients.begin(), clients.end(), [](thread& t) {
-		t.join();
-	});
-
-	system("pause");
-}
-
-int main(int argc, char *argv[])
-{
-	hosts.insert(make_pair(1, SHostInfo(1, "localhost", "13579", "野外战场")));
-
-	for (int i = 0; i < argc; ++i) {
-		cout << argv[i] << endl;
-	}
-
-	cout << "Welcome to host client" << endl;
-	cout << "enter number to choose host" << endl;
-	cout << EQ_LINE_SEPARATOR << endl;
-	for_each(hosts.begin(), hosts.end(), [](const pair<int, SHostInfo>& hostPair)->void {
-		cout << hostPair.second.id_ << ": " << hostPair.second.info_ << endl;
-	});
-	cout << EQ_LINE_SEPARATOR << endl;
-
-	int id;
-	int c;
-	string user;
-	string pwd;
-	while ((c=_getch()) != EOF) {
-		system("cls");
-	}
-	while (cin >> id) {
-		if (!hosts.count(id)) {
-			cout << "invalid id, please enter again" << endl;
-		}
-		else {
-			cout << "try to login host " << id << endl;
-		}
+		LogSave("Exception: %s", e.what());
 	}
 
 	system("pause");

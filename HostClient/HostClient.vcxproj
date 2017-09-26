@@ -88,12 +88,14 @@
       <Optimization>Disabled</Optimization>
       <PreprocessorDefinitions>WIN32;_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <SDLCheck>true</SDLCheck>
-      <AdditionalIncludeDirectories>$(SolutionDir)..\ExternalUtil\boost_1_63_0\Include;$(SolutionDir)Base</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(SolutionDir)..\ExternalUtil\boost_1_63_0\Include;$(SolutionDir)Base;$(SolutionDir)..\ExternalUtil\JsonCpp_1_8_1\Include</AdditionalIncludeDirectories>
+      <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalLibraryDirectories>$(SolutionDir)..\ExternalUtil\boost_1_63_0\Lib\x86</AdditionalLibraryDirectories>
+      <AdditionalLibraryDirectories>$(SolutionDir)..\ExternalUtil\boost_1_63_0\Lib\x86;$(SolutionDir)..\ExternalUtil\JsonCpp_1_8_1\Lib\x86\Debug</AdditionalLibraryDirectories>
+      <AdditionalDependencies>lib_json.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">

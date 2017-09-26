@@ -28,10 +28,15 @@
 #include <thread>
 #include <Base/Util.h>
 #include <Base/Msg.h>
+#include <json/json.h>
+#include <map>
+#include <string>
+using namespace std;
+
+map<string, string> g_users;
 
 namespace wind {
 
-using namespace std;
 using boost::asio::ip::tcp;
 
 class Participant {
@@ -70,14 +75,17 @@ private:
 	std::set<ParticipantRef> participants_;
 };
 
+class Server;
+
 class ChatSession 
 	: public Participant
 	, public std::enable_shared_from_this<ChatSession> 
 {
 public:
-	ChatSession(tcp::socket socket, Room& room)
+	ChatSession(tcp::socket socket, Room& room, Server& server)
 		: socket_(std::move(socket))
 		, room_(room)
+		, server_(server)
 	{
 	}
 
@@ -124,7 +132,39 @@ private:
 		boost::asio::async_read(socket_, boost::asio::buffer(inMsg_.Body(), inMsg_.BodyLength()),
 			[this, self](boost::system::error_code ec, size_t length) {
 			if (!ec) {
-				room_.DeliverMsg(inMsg_);
+				LogSave("inMsg: %s", inMsg_.Body());
+
+				Json::Value valMsg;
+				Json::Reader reader;
+				if (!reader.parse(inMsg_.Body(), inMsg_.Body() + inMsg_.BodyLength(), valMsg)) {
+					LogSave("ReadMsg fail parse: %s", inMsg_.Body());
+					room_.Leave(shared_from_this());
+				}
+
+				if (valMsg["msgType"] == Msg::MSG_TYPE_LOGIN) {
+					Json::Value valAck;
+					valAck["msgType"] = Msg::MSG_TYPE_LOGIN_ACK;
+
+					string user = valMsg["user"].asString();
+					string pwd = valMsg["pwd"].asString();
+					bool result = g_users.count(user) && g_users[user] == pwd;
+					
+					valAck["result"] = result ? 0 : 1;
+					Json::FastWriter writer;
+					string strMsgBody = writer.write(valAck);
+
+					Msg msg;
+					msg.SetBodyLength(strMsgBody.length());
+					memcpy(msg.Body(), strMsgBody.c_str(), msg.BodyLength());
+					msg.EncodeHeader();
+					DeliverMsg(msg);
+
+					if (!result) {
+						LogSave("Fail validate user");
+						room_.Leave(shared_from_this());
+					}
+				}
+
 				ReadMsgHeader();
 			}
 			else {
@@ -151,6 +191,7 @@ private:
 private:
 	tcp::socket socket_;
 	Room& room_;
+	Server& server_;
 	Msg inMsg_;
 	deque<Msg> outMsgs_;
 };
@@ -176,7 +217,7 @@ private:
 		acceptor_.async_accept(socket_, [this](boost::system::error_code ec) {
 			if (!ec) {
 				LogSave("Client connect...");
-				std::make_shared<ChatSession>(std::move(socket_), room_)->Start();
+				std::make_shared<ChatSession>(std::move(socket_), room_, *this)->Start();
 			}
 			else {
 				
