@@ -2,7 +2,7 @@
 //	<one line to give the program's name and a brief idea of what it does.>
 //	Copyright (C) 2017. WenJin Yu. windpenguin@gmail.com.
 //
-//	Created at 2017/9/6 17:05:55
+//	Created at 2017/9/27 19:16:59
 //	Version 1.0
 //
 //	This program is free software: you can redistribute it and/or modify
@@ -21,48 +21,35 @@
 
 #pragma once
 
-#include <iostream>
-#include <string>
-#include <thread>	// this_thread
-#include <sstream> // ostringstream
-//#include <Windows.h>
-using namespace std;
+#include <Windows.h>
 
 namespace wind {
 
-class MyCS {
+class WindCS {
 public:
-	MyCS() { InitializeCriticalSection(&cs_); }
-	void Lock() { EnterCriticalSection(&cs_); }
-	void Unlock() { LeaveCriticalSection(&cs_); }
+	WindCS() { ::InitializeCriticalSection(&cs_); }
+	~WindCS() { ::DeleteCriticalSection(&cs_); }
+
+	void Lock() { ::EnterCriticalSection(&cs_); }
+	void Unlock() { ::LeaveCriticalSection(&cs_); }
+
 private:
-	CRITICAL_SECTION cs_;
+	WindCS(const WindCS&);
+	WindCS& operator=(const WindCS&);
+
+	::CRITICAL_SECTION cs_;
 };
 
-MyCS gLogCS;
-
-void LogSave(const char* pszFormat, ...) {
-	gLogCS.Lock();
-	ostringstream oss;
-	oss << this_thread::get_id();
-	printf_s("[%s][%I64d]: ", oss.str().c_str(), time(nullptr));
-	va_list args;
-	va_start(args, pszFormat);
-	vprintf_s(pszFormat, args);
-	va_end(args);
-	printf_s("\n");
-	fflush(stdout);
-	gLogCS.Unlock();
-}
-
-class WindLogger {
+class WindLocker {
 public:
-	WindLogger() {}
-	~WindLogger() {}
+	explicit WindLocker(WindCS* pwcs) : pwcs_(pwcs) { pwcs_->Lock(); }
+	~WindLocker() { pwcs_->Unlock(); }
 
 private:
-	WindLogger(const WindLogger&);
-	void operator=(const WindLogger&);
+	WindLocker(const WindLocker&);
+	WindLocker& operator=(const WindLocker&);
+
+	WindCS* pwcs_;
 };
 
 } // namespace wind

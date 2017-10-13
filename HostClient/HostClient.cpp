@@ -16,12 +16,13 @@ using namespace std;
 using namespace wind;
 
 void PrintUsage() {
-	cout << "usage: HostClient.exe [host] [port] [user]" << endl;
+	EASY_LOG << "usage: HostClient.exe [host] [port] [user]";
 }
 
-void PrintHelp() {
-	cout << "Enter number to choose operation" << endl;
-	cout << "1: restart wild" << endl;
+void PrintCmd() {
+	EASY_LOG << "Enter number to choose operation";
+	EASY_LOG << "1: restart wild";
+	EASY_LOG << "2: quit";
 }
 
 int main(int argc, char *argv[])
@@ -40,50 +41,97 @@ int main(int argc, char *argv[])
 		return 0;
 	}
 
-	cout << "Enter password: ";
-
-	string pwd;
-	int c;
-	while ((c=_getch()) != EOF ) {
-		if (c == '\r') {
-			cout << endl;
-			break;
-		}
-		pwd += char(c);
-	}
-
-	if (pwd.empty()) {
-		PrintUsage();
-		return 0;
-	}
-
 	try {
 		boost::asio::io_service io_service;
 
 		tcp::resolver resovler(io_service);
 		auto endpoint_iterator = resovler.resolve({ host, port });
-		Client client(io_service, endpoint_iterator, user, pwd);
+		Client client(io_service, endpoint_iterator);
 
-		std::thread t([&io_service]() { io_service.run(); });
+		std::thread t1([&io_service]() { io_service.run(); });
 
 		while (true) {
-			LogSave("Waiting response...");
 			Sleep(1000);
 
-			if (client.Validate())
+			switch (client.ConnectState())
+			{
+			case Client::EConnectState::Ok:
+				break;
+			case Client::EConnectState::Connecting:
+				EASY_LOG << "Connecting...";
+				continue;
+			case Client::EConnectState::Fail:
+				return 1;
+			default:
+				continue;
+			}
+
+			if (client.ConnectOk())
 				break;
 		}
 
-		PrintHelp();
+		while (true) {
+			EASY_LOG << "Enter password: ";
 
-		int opt;
+			string pwd;
+			int c;
+			while ((c = _getch()) != EOF) {
+				if (c == '\r') {
+					cout << endl;
+					break;
+				}
+				pwd += char(c);
+			}
+
+			client.Login(user, pwd);
+
+			while (true) {
+				Sleep(1000);
+
+				switch (client.LoginState())
+				{
+				case Client::ELoginState::Ok:
+					break;
+				case Client::ELoginState::Logging:
+					EASY_LOG << "Logging...";
+					continue;
+				case Client::ELoginState::Fail:
+					EASY_LOG << "Error pwd";
+					break;
+				default:
+					continue;
+				}
+
+				break;
+			}
+
+			if (client.LoginOk())
+				break;
+		}
+
+		PrintCmd();
+
+		int opt = 0;
+		bool bQuit = false;
 		while (true) {
 			cin >> opt;
 			switch (opt)
 			{
 			case 1:
-				
+				client.SendCmd(Msg::MsgType::RestartWild);
+				break;
+			case 2:
+				client.SendCmd(Msg::MsgType::Logout);
+				client.Logout();
+				bQuit = true;
+				break;
+			default:
+				EASY_LOG << "Unknown operation";
+				break;
 			}
+			
+			if (bQuit)
+				break;
 		}
 
 		// 		char szContent[Msg::MAX_BODY_LENGTH + 1] = "";
@@ -115,8 +163,7 @@ int main(int argc, char *argv[])
 		// 			}
 		// 		}
 
-		client.Logout();
-		t.join();
+		t1.join();
 	}
 	catch (std::exception& e) {
 		LogSave("Exception: %s", e.what());

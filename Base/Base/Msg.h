@@ -21,16 +21,20 @@
 
 #pragma once
 
+#include <memory>
+
 namespace wind {
 
 class Msg {
 public:
 	enum { HEADER_LENGTH = 4 };
 	enum { MAX_BODY_LENGTH = 512 };
-	enum {
-		MSG_TYPE_LOGIN = 1,
-		MSG_TYPE_LOGIN_ACK = 2,
-		MSG_TYPE_RESTART_WILD = 3,
+	enum class MsgType {
+		None = 0,
+		Login = 1,
+		LoginAck = 2,
+		Logout = 3,
+		RestartWild = 4,
 	};
 
 	Msg() : bodyLength_(0) { memset(data_, 0, sizeof(data_)); }
@@ -65,5 +69,6 @@ private:
 	char data_[HEADER_LENGTH + MAX_BODY_LENGTH];
 	size_t bodyLength_;
 };
+typedef std::shared_ptr<Msg> MsgRef;
 
 } // namespace wind

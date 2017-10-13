@@ -35,5 +35,8 @@
     <ClCompile Include="HostClient.cpp">
       <Filter>源文件</Filter>
     </ClCompile>
+    <ClCompile Include="..\Base\Base\Log\Log.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
   </ItemGroup>
 </Project>

@@ -26,11 +26,12 @@
 #include <set>
 #include <deque>
 #include <thread>
-#include <Base/Util.h>
+#include <Base/Log/Log.h>
 #include <Base/Msg.h>
 #include <json/json.h>
 #include <map>
 #include <string>
+#include <fstream>
 using namespace std;
 
 map<string, string> g_users;
@@ -141,14 +142,17 @@ private:
 					room_.Leave(shared_from_this());
 				}
 
-				if (valMsg["msgType"] == Msg::MSG_TYPE_LOGIN) {
+				switch (valMsg["msgType"].asInt())
+				{
+				case Msg::MsgType::Login:
+				{
 					Json::Value valAck;
-					valAck["msgType"] = Msg::MSG_TYPE_LOGIN_ACK;
+					valAck["msgType"] = static_cast<int>(Msg::MsgType::LoginAck);
 
 					string user = valMsg["user"].asString();
 					string pwd = valMsg["pwd"].asString();
 					bool result = g_users.count(user) && g_users[user] == pwd;
-					
+
 					valAck["result"] = result ? 0 : 1;
 					Json::FastWriter writer;
 					string strMsgBody = writer.write(valAck);
@@ -161,8 +165,28 @@ private:
 
 					if (!result) {
 						LogSave("Fail validate user");
-						room_.Leave(shared_from_this());
 					}
+				}
+				break;
+				case Msg::MsgType::Logout:
+				{
+
+				}
+				break;
+				case Msg::MsgType::RestartWild:
+				{
+					thread t([]() {
+						system("killgs.bat");
+						system("killlp.bat");
+						Sleep(3000);
+						system("startlp.bat");
+						system("startgs.bat");
+					});
+					t.join();
+				}
+				break; 
+				default:
+					break;
 				}
 
 				ReadMsgHeader();
@@ -206,10 +230,15 @@ public:
 		AcceptClient();
 	}
 
+	~Server() {
+		Close();
+	}
+
 	void DeliverMsg(const Msg& msg) { room_.DeliverMsg(msg); }
 
 	void Close() {
 		room_.LeaveAll();
+		acceptor_.close();
 	}
 
 private:

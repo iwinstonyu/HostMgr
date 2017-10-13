@@ -25,7 +25,9 @@
 #include <json/json.h>
 #include <deque>
 #include <Base/Msg.h>
-#include <Base/Util.h>
+#include <Base/Log/Log.h>
+#include <Base/SingleQueue/SingleQueue.h>
+#include <thread>
 
 namespace wind {
 
@@ -34,68 +36,146 @@ using namespace std;
 
 class Client {
 public:
-	Client(boost::asio::io_service& io_service, tcp::resolver::iterator endpoint_iterator, string user, string pwd)
+	enum class EConnectState { None, Connecting, Fail, Ok };
+	enum class ELoginState { None, Logging, Fail, Ok };
+
+public:
+	Client(boost::asio::io_service& io_service, tcp::resolver::iterator endpoint_iterator)
 		: io_service_(io_service)
 		, socket_(io_service)
-		, online_(false)
-		, connecting_(false)
-		, user_(user)
-		, pwd_(pwd)
-		, validate_(false)
+		, connectState_(EConnectState::None)
+		, loginState_( ELoginState::None )
+		, outMsgs_(1000)
+		, inMsgs_(1000)
+		, bNetWriteMsg_(false)
 	{
 		ConnectServer(endpoint_iterator);
 	}
 
-	bool Online() { return online_; }
-	bool Validate() { return validate_; }
+	~Client() {
+		thProcessMsg_.join();
+	}
+
+	Client::EConnectState ConnectState() { return connectState_; }
+	bool ConnectOk() { return connectState_ == EConnectState::Ok; }
+	Client::ELoginState LoginState() { return loginState_; }
+	bool LoginOk() { return loginState_ == ELoginState::Ok; }
 
 	void SendMsg(const Msg& msg) {
-		if (!connecting_) {
-			LogSave("SendMsg not connecting");
+		if (!LoginOk()) {
+			LogSave("SendMsg not login");
 			return;
 		}
 
 		LogSave("SendMsg:%s", msg.Body());
-		io_service_.post([this, msg](){
-			outMsgs_.push_back(msg);
-			if (outMsgs_.size() == 1) {
-				WriteMsg();
-			}
-		});
+		WriteMsg(msg);
+	}
+
+	bool SendCmd(Msg::MsgType cmd) {
+		if (!LoginOk()) {
+			LogSave("SendCmd not login");
+			return false;
+		}
+
+		Json::Value valUser;
+		valUser["msgType"] = static_cast<int>(cmd);
+		Json::FastWriter writer;
+		string strMsgBody = writer.write(valUser);
+
+		Msg msg;
+		msg.SetBodyLength(strMsgBody.length());
+		memcpy(msg.Body(), strMsgBody.c_str(), msg.BodyLength());
+		msg.EncodeHeader();
+
+		LogSave("SendCmd:%s", msg.Body());
+		WriteMsg(msg);
+		return true;
+	}
+
+	bool Login(string user, string pwd) {
+		if (!ConnectOk())
+			return false;
+
+		loginState_ = ELoginState::Logging;
+
+		Json::Value valUser;
+		valUser["msgType"] = static_cast<int>(Msg::MsgType::Login);
+		valUser["user"] = user;
+		valUser["pwd"] = pwd;
+		Json::FastWriter writer;
+		string strMsgBody = writer.write(valUser);
+
+		Msg msg;
+		msg.SetBodyLength(strMsgBody.length());
+		memcpy(msg.Body(), strMsgBody.c_str(), msg.BodyLength());
+		msg.EncodeHeader();
+
+		WriteMsg(msg);
+		return true;
 	}
 
 	void Logout() {
-		LogSave("Client[%d] logout...", clientId_);
+		EASY_LOG << "Logout...";
 		io_service_.post([this]() { socket_.close(); });
-		online_ = false;
-		connecting_ = false;
+		connectState_ = EConnectState::None;
+		loginState_ = ELoginState::None;
 	}
 
 private:
 	void ConnectServer(tcp::resolver::iterator endpoint_iterator) {
-		LogSave("Connecting server...");
+		EASY_LOG << "Connecting...";
+		connectState_ = EConnectState::Connecting;
+
 		boost::asio::async_connect(socket_, endpoint_iterator, 
 			[this](boost::system::error_code ec, tcp::resolver::iterator) {
 			if (!ec) {
-				connecting_ = true;
-				LogSave("Validate user...");
-				
-				Json::Value valUser;
-				valUser["msgType"] = Msg::MSG_TYPE_LOGIN;
-				valUser["user"] = user_;
-				valUser["pwd"] = pwd_;
-				Json::FastWriter writer;
-				string strMsgBody = writer.write(valUser);
-				
-				Msg msg;
-				msg.SetBodyLength(strMsgBody.length());
-				memcpy(msg.Body(), strMsgBody.c_str(), msg.BodyLength());
-				msg.EncodeHeader();
-				SendMsg(msg);
+				connectState_ = EConnectState::Ok;
+				EASY_LOG << "Connect succ";
 
 				ReadMsgHeader();
+
+				std::thread t1(std::bind(&Client::ProcessMsg, this));
+				thProcessMsg_.swap(t1);
+			}
+			else {
+				EASY_LOG << "Connect fail";
 			}
 		});
+	}
+
+	void ProcessMsg() {
+		while (ConnectOk()) {
+			Sleep(1000);
+
+			MsgRef msgRef;
+			while (ConnectOk() && (msgRef = inMsgs_.Read())) {
+				Json::Value valMsg;
+				Json::Reader reader;
+				if (!reader.parse(msgRef->Body(), msgRef->Body() + msgRef->BodyLength(), valMsg)) {
+					EASY_LOG << "ProcessMsg fail parse: " << msgRef->Body();
+					continue;
+				}
+
+				switch (valMsg["msgType"].asUInt())
+				{
+				case Msg::MsgType::LoginAck:
+				{
+					if (valMsg["result"].asInt() == 0) {
+						loginState_ = ELoginState::Ok;
+						EASY_LOG << "Login succ";
+					}
+					else {
+						loginState_ = ELoginState::Fail;
+						EASY_LOG << "Login fail";
+					}
+				}
+				break;
+				default:
+					EASY_LOG << "ProcessMsg unknown: " << msgRef->Body();
+					break;
+				}
+			}
+		}
 	}
 
 	void ReadMsgHeader() {
@@ -106,6 +186,7 @@ private:
 				ReadMsgBody();
 			}
 			else {
+				EASY_LOG << "ReadMsgHeader fail";
 				socket_.close();
 			}
 		});
@@ -115,59 +196,57 @@ private:
 		boost::asio::async_read(socket_, boost::asio::buffer(inMsg_.Body(), inMsg_.BodyLength()),
 			[this](boost::system::error_code ec, size_t length) {
 			if (!ec) {
-				LogSave("ReadMsg: %s", inMsg_.Body());
+				EASY_LOG << "ReadMsg: " << inMsg_.Body();
 
-				Json::Value valMsg;
-				Json::Reader reader;
-				if (!reader.parse(inMsg_.Body(), inMsg_.Body() + inMsg_.BodyLength(), valMsg)) {
-					LogSave("ReadMsg fail parse: %s", inMsg_.Body());
-					socket_.close();
-				}
-
-				if (valMsg["msgType"] == Msg::MSG_TYPE_LOGIN_ACK) {
-					if (valMsg["result"] == 0) {
-						validate_ = true;
-						LogSave("Login succ");
-					}
-					else {
-						LogSave("Fail validate user");
-						socket_.close();
-					}
-				}
+				inMsgs_.Write(make_shared<Msg>(inMsg_));
 
 				ReadMsgHeader();
 			}
 			else {
+				EASY_LOG << "ReadMsgBody fail";
 				socket_.close();
 			}
 		});
 	}
 
-	void WriteMsg() {
-		boost::asio::async_write(socket_, boost::asio::buffer(outMsgs_.front().Data(), outMsgs_.front().Length()),
-			[this](boost::system::error_code ec, size_t length) {
-			if (!ec) {
-				outMsgs_.pop_front();
-				if (!outMsgs_.empty())
-					WriteMsg();
-			}
-			else {
-				socket_.close();
-			}
-		});
+	void WriteMsg(const Msg& msg) {
+		outMsgs_.Write(make_shared<Msg>(msg));
+		
+		if (!bNetWriteMsg_) 
+			NetWriteMsg();
+	}
+
+	void NetWriteMsg() {
+		MsgRef msgRef;
+		if (msgRef = outMsgs_.Read()) {
+			bNetWriteMsg_ = true;
+			boost::asio::async_write(socket_, boost::asio::buffer(msgRef->Data(), msgRef->Length()),
+				[this](boost::system::error_code ec, size_t length) {
+				if (!ec) {
+					EASY_LOG << "WriteMsg succ";
+					NetWriteMsg();
+				}
+				else {
+					EASY_LOG << "WriteMsg fail";
+					socket_.close();
+				}
+			});
+		}
+		else {
+			bNetWriteMsg_ = false;
+		}
 	}
 
 private:
 	boost::asio::io_service& io_service_;
 	tcp::socket socket_;
 	Msg inMsg_;
-	deque<Msg> outMsgs_;
-	int clientId_;
-	bool online_;
-	bool connecting_;
-	bool validate_;
-	string user_;
-	string pwd_;
+	EConnectState connectState_;
+	ELoginState loginState_;
+	SingleQueue<Msg> outMsgs_;
+	SingleQueue<Msg> inMsgs_;
+	bool bNetWriteMsg_;
+	thread thProcessMsg_;
 };
 
 } // namespace wind
