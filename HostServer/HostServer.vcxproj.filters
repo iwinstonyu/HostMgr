@@ -38,6 +38,9 @@
     <ClCompile Include="HostServer.cpp">
       <Filter>源文件</Filter>
     </ClCompile>
+    <ClCompile Include="..\Base\Base\WindRaffle\WindRaffle.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
     <ClCompile Include="..\Base\Base\Log\Log.cpp">
       <Filter>源文件</Filter>
     </ClCompile>

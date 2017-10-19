@@ -16,17 +16,60 @@ using namespace std;
 using namespace wind;
 
 void PrintUsage() {
-	EASY_LOG << "usage: HostClient.exe [host] [port] [user]";
+	EASY_LOG_FILE("main") << "usage: HostClient.exe [host] [port] [user]";
 }
 
 void PrintCmd() {
-	EASY_LOG << "Enter number to choose operation";
-	EASY_LOG << "1: restart wild";
-	EASY_LOG << "2: quit";
+	EASY_LOG_FILE("main") << "Enter number to choose operation";
+	EASY_LOG_FILE("main") << "1: restart wild";
+	EASY_LOG_FILE("main") << "2: quit";
+}
+
+BOOL WINAPI CtrlHandler(DWORD fdwCtrlType)
+{
+	switch (fdwCtrlType)
+	{
+		// Handle the CTRL-C signal. 
+	case CTRL_C_EVENT:
+		printf("Ctrl-C event\n\n");
+		Beep(750, 300);
+		return(TRUE);
+
+		// CTRL-CLOSE: confirm that the user wants to exit. 
+	case CTRL_CLOSE_EVENT:
+		Beep(600, 200);
+		printf("Ctrl-Close event\n\n");
+		EASY_LOG_FILE("main") << "CTRL_CLOSE_EVENT";
+		return(TRUE);
+
+		// Pass other signals to the next handler. 
+	case CTRL_BREAK_EVENT:
+		Beep(900, 200);
+		printf("Ctrl-Break event\n\n");
+		return FALSE;
+
+	case CTRL_LOGOFF_EVENT:
+		Beep(1000, 200);
+		printf("Ctrl-Logoff event\n\n");
+		return FALSE;
+
+	case CTRL_SHUTDOWN_EVENT:
+		Beep(750, 500);
+		printf("Ctrl-Shutdown event\n\n");
+		EASY_LOG_FILE("main") << "CTRL_SHUTDOWN_EVENT";
+		return FALSE;
+
+	default:
+		return FALSE;
+	}
 }
 
 int main(int argc, char *argv[])
 {
+	EasyLogInit();
+
+	//SetConsoleCtrlHandler(CtrlHandler, TRUE);
+
 	if (argc < 4) {
 		PrintUsage();
 		return 0;
@@ -50,28 +93,19 @@ int main(int argc, char *argv[])
 
 		std::thread t1([&io_service]() { io_service.run(); });
 
-		while (true) {
+		while (client.ConnectState() == Client::EConnectState::Connecting) {
+			EASY_LOG_FILE("main") << "Connecting...";
 			Sleep(1000);
+		}
 
-			switch (client.ConnectState())
-			{
-			case Client::EConnectState::Ok:
-				break;
-			case Client::EConnectState::Connecting:
-				EASY_LOG << "Connecting...";
-				continue;
-			case Client::EConnectState::Fail:
-				return 1;
-			default:
-				continue;
-			}
-
-			if (client.ConnectOk())
-				break;
+		if (!client.ConnectOk()) {
+			Sleep(1000);
+			t1.join();
+			return 1;
 		}
 
 		while (true) {
-			EASY_LOG << "Enter password: ";
+			EASY_LOG_FILE("main") << "Enter password: ";
 
 			string pwd;
 			int c;
@@ -93,10 +127,10 @@ int main(int argc, char *argv[])
 				case Client::ELoginState::Ok:
 					break;
 				case Client::ELoginState::Logging:
-					EASY_LOG << "Logging...";
+					EASY_LOG_FILE("main") << "Logging...";
 					continue;
 				case Client::ELoginState::Fail:
-					EASY_LOG << "Error pwd";
+					EASY_LOG_FILE("main") << "Error pwd";
 					break;
 				default:
 					continue;
@@ -109,30 +143,62 @@ int main(int argc, char *argv[])
 				break;
 		}
 
-		PrintCmd();
-
-		int opt = 0;
-		bool bQuit = false;
-		while (true) {
-			cin >> opt;
-			switch (opt)
-			{
-			case 1:
-				client.SendCmd(Msg::MsgType::RestartWild);
-				break;
-			case 2:
-				client.SendCmd(Msg::MsgType::Logout);
-				client.Logout();
-				bQuit = true;
-				break;
-			default:
-				EASY_LOG << "Unknown operation";
-				break;
-			}
-			
-			if (bQuit)
-				break;
+		if (!client.LoginOk()) {
+			Sleep(1000);
+			t1.join();
+			return 1;
 		}
+
+		volatile int cmd;
+		thread t2([&cmd, &client]()->void {
+			int opt = 0;
+			while (true) {
+				if (!client.LoginOk())
+					break;
+
+				if (!cmd) {
+					PrintCmd();
+
+					cin >> opt;
+
+					if (!client.LoginOk())
+						break;
+
+					if (opt >= 1 && opt <= 2)
+						cmd = opt;
+					else
+						EASY_LOG_FILE("main") << "Unknown option";
+				}
+
+				Sleep(100);
+			}
+		});
+
+		while (client.LoginOk()) {
+			if (cmd) {
+				bool bQuit = false;
+				switch (cmd)
+				{
+				case 1:
+					client.SendCmd(Msg::MsgType::RestartWild);
+					break;
+				case 2:
+					client.SendCmd(Msg::MsgType::Logout);
+					client.Stop();
+					bQuit = true;
+					break;
+				default:
+					break;
+				}
+
+				cmd = 0;
+			}
+
+			Sleep(100);
+		}
+
+		t1.join();
+		t2.join();
 
 		// 		char szContent[Msg::MAX_BODY_LENGTH + 1] = "";
 		// 		while (std::cin.getline(szContent, Msg::MAX_BODY_LENGTH + 1)) {
@@ -163,13 +229,11 @@ int main(int argc, char *argv[])
 		// 			}
 		// 		}
 
-		t1.join();
 	}
 	catch (std::exception& e) {
-		LogSave("Exception: %s", e.what());
+		EASY_LOG_FILE("main") << "Exception: " << e.what();
 	}
 
-	system("pause");
 	return 0;
 }
 

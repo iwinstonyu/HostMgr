@@ -26,15 +26,15 @@
 #include <set>
 #include <deque>
 #include <thread>
-#include <Base/Log/Log.h>
 #include <Base/Msg.h>
 #include <json/json.h>
 #include <map>
 #include <string>
 #include <fstream>
+#include <Base/Log/Log.h>
 using namespace std;
 
-map<string, string> g_users;
+extern map<string, string> g_users;
 
 namespace wind {
 
@@ -43,25 +43,27 @@ using boost::asio::ip::tcp;
 class Participant {
 public:
 	virtual ~Participant() {}
-	virtual void Logout() = 0;
+	virtual void Start() = 0;
+	virtual void Stop() = 0;
 	virtual void DeliverMsg(const Msg& msg) = 0;
 };
 typedef shared_ptr<Participant> ParticipantRef;
 
 class Room {
 public:
-	void Join(ParticipantRef participant) {
+	void Start(ParticipantRef participant) {
 		participants_.insert(participant);
+		participant->Start();
 	}
 
-	void Leave(ParticipantRef participant) {
+	void Stop(ParticipantRef participant) {
 		participants_.erase(participant);
+		participant->Stop();
 	}
 
-	void LeaveAll() {
-		for_each(participants_.begin(), participants_.end(), [](ParticipantRef participant) {
-			participant->Logout();
-		});
+	void StopAll() {
+		for_each(participants_.begin(), participants_.end(),
+			std::bind(&Participant::Stop, std::placeholders::_1));
 
 		participants_.clear();
 	}
@@ -90,13 +92,12 @@ public:
 	{
 	}
 
-	~ChatSession() {
-		LogSave("Destroy chat session...");
-		//socket_.close();
+	void Start() {
+		ReadMsgHeader();
 	}
 
-	void Logout() {
-		LogSave("Logout chat session...");
+	void Stop() {
+		EASY_LOG_FILE("main") << "Stop Client";
 		socket_.close();
 	}
 
@@ -105,11 +106,6 @@ public:
 		if (outMsgs_.size() == 1) {
 			WriteMsg();
 		}
-	}
-
-	void Start() {
-		room_.Join(shared_from_this());
-		ReadMsgHeader();
 	}
 
 private:
@@ -122,8 +118,8 @@ private:
 				ReadMsgBody();
 			}
 			else {
-				LogSave("Client log out");
-				room_.Leave(shared_from_this());
+				room_.Stop(shared_from_this());
+				return;
 			}
 		});
 	}
@@ -133,13 +129,13 @@ private:
 		boost::asio::async_read(socket_, boost::asio::buffer(inMsg_.Body(), inMsg_.BodyLength()),
 			[this, self](boost::system::error_code ec, size_t length) {
 			if (!ec) {
-				LogSave("inMsg: %s", inMsg_.Body());
+				EASY_LOG_FILE("main") << "inMsg: " << inMsg_.Body();
 
 				Json::Value valMsg;
 				Json::Reader reader;
 				if (!reader.parse(inMsg_.Body(), inMsg_.Body() + inMsg_.BodyLength(), valMsg)) {
-					LogSave("ReadMsg fail parse: %s", inMsg_.Body());
-					room_.Leave(shared_from_this());
+					room_.Stop(shared_from_this());
+					return;
 				}
 
 				switch (valMsg["msgType"].asInt())
@@ -164,7 +160,7 @@ private:
 					DeliverMsg(msg);
 
 					if (!result) {
-						LogSave("Fail validate user");
+						EASY_LOG_FILE("main") << "Fail validate user";
 					}
 				}
 				break;
@@ -175,14 +171,11 @@ private:
 				break;
 				case Msg::MsgType::RestartWild:
 				{
-					thread t([]() {
-						system("killgs.bat");
-						system("killlp.bat");
-						Sleep(3000);
-						system("startlp.bat");
-						system("startgs.bat");
-					});
-					t.join();
+					system("..\\killgs.bat");
+					system("..\\killlp.bat");
+					Sleep(3000);
+					system("..\\startlp.bat");
+					system("..\\startgs.bat");
 				}
 				break; 
 				default:
@@ -192,7 +185,7 @@ private:
 				ReadMsgHeader();
 			}
 			else {
-				room_.Leave(shared_from_this());
+				room_.Stop(shared_from_this());
 			}
 		});
 	}
@@ -207,7 +200,7 @@ private:
 					WriteMsg();
 			}
 			else {
-				room_.Leave(shared_from_this());
+				room_.Stop(shared_from_this());
 			}
 		});
 	}
@@ -222,31 +215,64 @@ private:
 
 class Server {
 public:
-	Server(boost::asio::io_service& io_service, const tcp::endpoint& endpoint)
-	: acceptor_(io_service, endpoint)
-	, socket_(io_service)
+	Server()
+		: io_service_()
+		, acceptor_(io_service_)
+		, socket_(io_service_)
+		, signals_(io_service_)
+		, stop_(false)
 	{
-		LogSave("Server start...");
+//		signals_.add(SIGINT);
+//		signals_.add(SIGTERM);
+//		signals_.add(SIGBREAK);
+//#if defined(SIGQUIT)
+//		signals_.add(SIGQUIT);
+//#endif // defined(SIGQUIT)
+//		signals_.async_wait(std::bind(&Server::Stop, this));
+
+		tcp::endpoint endpoint(tcp::v4(), 31234);
+		acceptor_.open(endpoint.protocol());
+		acceptor_.set_option(tcp::acceptor::reuse_address(true));
+		acceptor_.bind(endpoint);
+		acceptor_.listen();
+
 		AcceptClient();
+
+		EASY_LOG_FILE("main") << "Server start";
 	}
 
 	~Server() {
-		Close();
+		EASY_LOG_FILE("main") << "Server destroy";
+	}
+
+	void Run() {
+		io_service_.run();
+	}
+
+	void Stop() {
+		if (stop_)
+			return;
+		stop_ = true;
+
+		EASY_LOG_FILE("main") << "Server stop";
+
+		acceptor_.close();
+		room_.StopAll();
 	}
 
 	void DeliverMsg(const Msg& msg) { room_.DeliverMsg(msg); }
 
-	void Close() {
-		room_.LeaveAll();
-		acceptor_.close();
-	}
-
 private:
 	void AcceptClient() {
 		acceptor_.async_accept(socket_, [this](boost::system::error_code ec) {
+			if (!acceptor_.is_open()) {
+				EASY_LOG_FILE("main") << "Acceptor not open";
+				return;
+			}
+
 			if (!ec) {
-				LogSave("Client connect...");
-				std::make_shared<ChatSession>(std::move(socket_), room_, *this)->Start();
+				EASY_LOG_FILE("main") << "Client connect";
+				room_.Start(std::make_shared<ChatSession>(std::move(socket_), room_, *this));
 			}
 			else {
 				
@@ -255,9 +281,12 @@ private:
 		});
 	}
 
+	boost::asio::io_service io_service_;
 	tcp::acceptor acceptor_;
 	tcp::socket socket_;
 	Room room_;
+	boost::asio::signal_set signals_;
+	bool stop_;
 };
 
 } // namespace wind

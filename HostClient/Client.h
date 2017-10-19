@@ -25,8 +25,8 @@
 #include <json/json.h>
 #include <deque>
 #include <Base/Msg.h>
-#include <Base/Log/Log.h>
 #include <Base/SingleQueue/SingleQueue.h>
+#include <Base/Log/Log.h>
 #include <thread>
 
 namespace wind {
@@ -48,12 +48,14 @@ public:
 		, outMsgs_(1000)
 		, inMsgs_(1000)
 		, bNetWriteMsg_(false)
+		, stop_(false)
+		, runProcessMsg_(false)
 	{
 		ConnectServer(endpoint_iterator);
 	}
 
 	~Client() {
-		thProcessMsg_.join();
+		Stop();
 	}
 
 	Client::EConnectState ConnectState() { return connectState_; }
@@ -63,17 +65,17 @@ public:
 
 	void SendMsg(const Msg& msg) {
 		if (!LoginOk()) {
-			LogSave("SendMsg not login");
+			EASY_LOG_FILE("main") << "SendMsg not login";
 			return;
 		}
 
-		LogSave("SendMsg:%s", msg.Body());
+		EASY_LOG_FILE("main") << "SendMsg:" << msg.Body();
 		WriteMsg(msg);
 	}
 
 	bool SendCmd(Msg::MsgType cmd) {
 		if (!LoginOk()) {
-			LogSave("SendCmd not login");
+			EASY_LOG_FILE("main") << "SendCmd not login";
 			return false;
 		}
 
@@ -87,7 +89,7 @@ public:
 		memcpy(msg.Body(), strMsgBody.c_str(), msg.BodyLength());
 		msg.EncodeHeader();
 
-		LogSave("SendCmd:%s", msg.Body());
+		EASY_LOG_FILE("main") << "SendCmd: " << msg.Body();
 		WriteMsg(msg);
 		return true;
 	}
@@ -114,23 +116,29 @@ public:
 		return true;
 	}
 
-	void Logout() {
-		EASY_LOG << "Logout...";
+	void Stop() {
+		if (stop_)
+			return;
+		stop_ = true;
+
+		EASY_LOG_FILE("main") << "Stop client";
 		io_service_.post([this]() { socket_.close(); });
 		connectState_ = EConnectState::None;
 		loginState_ = ELoginState::None;
+		if( runProcessMsg_ )
+			thProcessMsg_.join();
 	}
 
 private:
 	void ConnectServer(tcp::resolver::iterator endpoint_iterator) {
-		EASY_LOG << "Connecting...";
+		EASY_LOG_FILE("main") << "Try connect server";
 		connectState_ = EConnectState::Connecting;
 
 		boost::asio::async_connect(socket_, endpoint_iterator, 
 			[this](boost::system::error_code ec, tcp::resolver::iterator) {
 			if (!ec) {
 				connectState_ = EConnectState::Ok;
-				EASY_LOG << "Connect succ";
+				EASY_LOG_FILE("main") << "Connect succ";
 
 				ReadMsgHeader();
 
@@ -138,21 +146,21 @@ private:
 				thProcessMsg_.swap(t1);
 			}
 			else {
-				EASY_LOG << "Connect fail";
+				EASY_LOG_FILE("main") << "Connect server fail";
+				Stop();
 			}
 		});
 	}
 
 	void ProcessMsg() {
+		runProcessMsg_ = true;
 		while (ConnectOk()) {
-			Sleep(1000);
-
 			MsgRef msgRef;
 			while (ConnectOk() && (msgRef = inMsgs_.Read())) {
 				Json::Value valMsg;
 				Json::Reader reader;
 				if (!reader.parse(msgRef->Body(), msgRef->Body() + msgRef->BodyLength(), valMsg)) {
-					EASY_LOG << "ProcessMsg fail parse: " << msgRef->Body();
+					EASY_LOG_FILE("main") << "ProcessMsg fail parse: " << msgRef->Body();
 					continue;
 				}
 
@@ -162,19 +170,21 @@ private:
 				{
 					if (valMsg["result"].asInt() == 0) {
 						loginState_ = ELoginState::Ok;
-						EASY_LOG << "Login succ";
+						EASY_LOG_FILE("main") << "Login succ";
 					}
 					else {
 						loginState_ = ELoginState::Fail;
-						EASY_LOG << "Login fail";
+						EASY_LOG_FILE("main") << "Login fail";
 					}
 				}
 				break;
 				default:
-					EASY_LOG << "ProcessMsg unknown: " << msgRef->Body();
+					EASY_LOG_FILE("main") << "ProcessMsg unknown: " << msgRef->Body();
 					break;
 				}
 			}
+
+			Sleep(100);
 		}
 	}
 
@@ -186,8 +196,8 @@ private:
 				ReadMsgBody();
 			}
 			else {
-				EASY_LOG << "ReadMsgHeader fail";
-				socket_.close();
+				EASY_LOG_FILE("main") << "ReadMsgHeader fail";
+				Stop();
 			}
 		});
 	}
@@ -196,15 +206,15 @@ private:
 		boost::asio::async_read(socket_, boost::asio::buffer(inMsg_.Body(), inMsg_.BodyLength()),
 			[this](boost::system::error_code ec, size_t length) {
 			if (!ec) {
-				EASY_LOG << "ReadMsg: " << inMsg_.Body();
+				EASY_LOG_FILE("main") << "ReadMsg: " << inMsg_.Body();
 
 				inMsgs_.Write(make_shared<Msg>(inMsg_));
 
 				ReadMsgHeader();
 			}
 			else {
-				EASY_LOG << "ReadMsgBody fail";
-				socket_.close();
+				EASY_LOG_FILE("main") << "ReadMsgBody fail";
+				Stop();
 			}
 		});
 	}
@@ -223,12 +233,12 @@ private:
 			boost::asio::async_write(socket_, boost::asio::buffer(msgRef->Data(), msgRef->Length()),
 				[this](boost::system::error_code ec, size_t length) {
 				if (!ec) {
-					EASY_LOG << "WriteMsg succ";
+					EASY_LOG_FILE("main") << "WriteMsg succ";
 					NetWriteMsg();
 				}
 				else {
-					EASY_LOG << "WriteMsg fail";
-					socket_.close();
+					EASY_LOG_FILE("main") << "WriteMsg fail";
+					Stop();
 				}
 			});
 		}
@@ -247,6 +257,8 @@ private:
 	SingleQueue<Msg> inMsgs_;
 	bool bNetWriteMsg_;
 	thread thProcessMsg_;
+	bool runProcessMsg_;
+	bool stop_;
 };
 
 } // namespace wind
