@@ -73,24 +73,17 @@ public:
 		WriteMsg(msg);
 	}
 
-	bool SendCmd(Msg::MsgType cmd) {
+	bool SendCmd(int opt) {
 		if (!LoginOk()) {
 			EASY_LOG_FILE("main") << "SendCmd not login";
 			return false;
 		}
 
-		Json::Value valUser;
-		valUser["msgType"] = static_cast<int>(cmd);
-		Json::FastWriter writer;
-		string strMsgBody = writer.write(valUser);
+		Json::Value val;
+		val["msgType"] = static_cast<int>(Msg::MsgType::Cmd);
+		val["opt"] = opt;
+		SendJsonMsg(val);
 
-		Msg msg;
-		msg.SetBodyLength(strMsgBody.length());
-		memcpy(msg.Body(), strMsgBody.c_str(), msg.BodyLength());
-		msg.EncodeHeader();
-
-		EASY_LOG_FILE("main") << "SendCmd: " << msg.Body();
-		WriteMsg(msg);
 		return true;
 	}
 
@@ -100,19 +93,27 @@ public:
 
 		loginState_ = ELoginState::Logging;
 
-		Json::Value valUser;
-		valUser["msgType"] = static_cast<int>(Msg::MsgType::Login);
-		valUser["user"] = user;
-		valUser["pwd"] = pwd;
-		Json::FastWriter writer;
-		string strMsgBody = writer.write(valUser);
+		Json::Value val;
+		val["msgType"] = static_cast<int>(Msg::MsgType::Login);
+		val["user"] = user;
+		val["pwd"] = pwd;
+		SendJsonMsg(val);
 
-		Msg msg;
-		msg.SetBodyLength(strMsgBody.length());
-		memcpy(msg.Body(), strMsgBody.c_str(), msg.BodyLength());
-		msg.EncodeHeader();
+		return true;
+	}
 
-		WriteMsg(msg);
+	bool Logout() {
+		if (!LoginOk()) {
+			EASY_LOG_FILE("main") << "Logout not login";
+			return false;
+		}
+
+		Json::Value val;
+		val["msgType"] = static_cast<int>(Msg::MsgType::Logout);
+		SendJsonMsg(val);
+
+		Stop();
+
 		return true;
 	}
 
@@ -152,6 +153,19 @@ private:
 		});
 	}
 
+	bool SendJsonMsg(Json::Value val) {
+		Json::FastWriter writer;
+		string strMsgBody = writer.write(val);
+
+		Msg msg;
+		msg.SetBodyLength(strMsgBody.length());
+		memcpy(msg.Body(), strMsgBody.c_str(), msg.BodyLength());
+		msg.EncodeHeader();
+
+		WriteMsg(msg);
+		return true;
+	}
+
 	void ProcessMsg() {
 		runProcessMsg_ = true;
 		while (ConnectOk()) {
@@ -175,6 +189,16 @@ private:
 					else {
 						loginState_ = ELoginState::Fail;
 						EASY_LOG_FILE("main") << "Login fail";
+					}
+				}
+				break;
+				case Msg::MsgType::CmdAck:
+				{
+					if (valMsg["result"].asBool() == true) {
+						EASY_LOG_FILE("main") << "Do cmd succ";
+					}
+					else {
+						EASY_LOG_FILE("main") << "Do cmd fail";
 					}
 				}
 				break;

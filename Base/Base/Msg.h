@@ -34,7 +34,8 @@ public:
 		Login = 1,
 		LoginAck = 2,
 		Logout = 3,
-		RestartWild = 4,
+		Cmd = 4,
+		CmdAck = 5,
 	};
 
 	Msg() : bodyLength_(0) { memset(data_, 0, sizeof(data_)); }

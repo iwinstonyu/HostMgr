@@ -35,6 +35,7 @@
 using namespace std;
 
 extern map<string, string> g_users;
+extern map<int, string> g_cmds;
 
 namespace wind {
 
@@ -169,13 +170,31 @@ private:
 
 				}
 				break;
-				case Msg::MsgType::RestartWild:
+				case Msg::MsgType::Cmd:
 				{
-					system("..\\killgs.bat");
-					system("..\\killlp.bat");
-					Sleep(3000);
-					system("..\\startlp.bat");
-					system("..\\startgs.bat");
+					int opt = valMsg["opt"].asInt();
+					bool result = false;
+					if (g_cmds.count(opt)) {
+						system(g_cmds[opt].c_str());
+						result = true;
+						EASY_LOG_FILE("main") << "Do cmd succ: " << opt;
+					}
+					else {
+						result = false;
+						EASY_LOG_FILE("main") << "Do cmd fail: " << opt;
+					}
+
+					Json::Value valAck;
+					valAck["msgType"] = static_cast<int>(Msg::MsgType::CmdAck);
+					valAck["result"] = result;
+					Json::FastWriter writer;
+					string strMsgBody = writer.write(valAck);
+
+					Msg msg;
+					msg.SetBodyLength(strMsgBody.length());
+					memcpy(msg.Body(), strMsgBody.c_str(), msg.BodyLength());
+					msg.EncodeHeader();
+					DeliverMsg(msg);
 				}
 				break; 
 				default:

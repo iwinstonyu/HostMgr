@@ -9,6 +9,7 @@ using boost::asio::ip::tcp;
 using namespace wind;
 
 map<string, string> g_users;
+map<int, string> g_cmds;
 
 // 这个函数在程序退出时进行清理工作
 std::function<void()> gCtrlRear;
@@ -30,13 +31,46 @@ BOOL WINAPI CtrlHandler(DWORD fdwCtrlType)
 	}
 }
 
+void InitAuth() {
+	const char* authFile = ".\\Auth.ini";
+
+	char sections[10240] = "";
+	GetPrivateProfileSectionNames(sections, sizeof(sections), authFile);
+
+	char name[1024] = "";
+	char pwd[1024] = "";
+	for (char* pszSection = sections; *pszSection != '\0'; pszSection += strlen(pszSection) + 1) {
+		::GetPrivateProfileString(pszSection, "name", "", name, sizeof(name), authFile);
+		::GetPrivateProfileString(pszSection, "pwd", "", pwd, sizeof(pwd), authFile);
+
+		if (strlen(name) && strlen(pwd)) {
+			g_users[name] = pwd;
+		}
+	}
+}
+
+void InitCmd() {
+	const char* cmdFile = ".\\Cmd.ini";
+
+	char sections[10240] = "";
+	GetPrivateProfileSectionNames(sections, sizeof(sections), cmdFile);
+
+	char cmd[1024] = "";
+	for (char* pszSection = sections; *pszSection != '\0'; pszSection += strlen(pszSection) + 1) {
+		::GetPrivateProfileString(pszSection, "cmd", "", cmd, sizeof(cmd), cmdFile);
+
+		if (strlen(pszSection) && strlen(cmd) ) {
+			g_cmds[atoi(pszSection)] = cmd;
+		}
+	}
+}
+
 int main()
 {
 	EasyLogInit();
 
-	g_users["ywj"] = "123";
-	g_users["cyq"] = "123";
-	g_users["llc"] = "123";
+	InitAuth();
+	InitCmd();
 
 	try {
 		Server s;

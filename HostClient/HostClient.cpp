@@ -22,7 +22,7 @@ void PrintUsage() {
 void PrintCmd() {
 	EASY_LOG_FILE("main") << "Enter number to choose operation";
 	EASY_LOG_FILE("main") << "1: restart wild";
-	EASY_LOG_FILE("main") << "2: quit";
+	EASY_LOG_FILE("main") << "99: quit";
 }
 
 BOOL WINAPI CtrlHandler(DWORD fdwCtrlType)
@@ -149,23 +149,23 @@ int main(int argc, char *argv[])
 			return 1;
 		}
 
-		volatile int cmd;
-		thread t2([&cmd, &client]()->void {
-			int opt = 0;
+		volatile int opt = 0;
+		thread t2([&opt, &client]()->void {
+			int input = 0;
 			while (true) {
 				if (!client.LoginOk())
 					break;
 
-				if (!cmd) {
+				if (!opt) {
 					PrintCmd();
 
-					cin >> opt;
+					cin >> input;
 
 					if (!client.LoginOk())
 						break;
 
-					if (opt >= 1 && opt <= 2)
-						cmd = opt;
+					if (input >= 1 && input <= 100)
+						opt = input;
 					else
 						EASY_LOG_FILE("main") << "Unknown option";
 				}
@@ -175,23 +175,18 @@ int main(int argc, char *argv[])
 		});
 
 		while (client.LoginOk()) {
-			if (cmd) {
+			if (opt) {
 				bool bQuit = false;
-				switch (cmd)
-				{
-				case 1:
-					client.SendCmd(Msg::MsgType::RestartWild);
-					break;
-				case 2:
-					client.SendCmd(Msg::MsgType::Logout);
-					client.Stop();
-					bQuit = true;
-					break;
-				default:
-					break;
+
+				if (opt > 0 && opt < 99) {
+					client.SendCmd(opt);
+				}
+				else if( opt == 99 ) {
+					client.Logout();
+					EASY_LOG_FILE("main") << "GoodBye!";
 				}
 
-				cmd = 0;
+				opt = 0;
 			}
 
 			Sleep(100);
@@ -199,6 +194,8 @@ int main(int argc, char *argv[])
 
 		t1.join();
 		t2.join();
+
+		Sleep(1000);
 
 		// 		char szContent[Msg::MAX_BODY_LENGTH + 1] = "";
 		// 		while (std::cin.getline(szContent, Msg::MAX_BODY_LENGTH + 1)) {
