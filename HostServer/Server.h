@@ -34,8 +34,14 @@
 #include <Base/Log/Log.h>
 using namespace std;
 
+struct SCmdData {
+	int opt;
+	string cmd;
+	string info;
+};
+
 extern map<string, string> g_users;
-extern map<int, string> g_cmds;
+extern map<int, SCmdData> g_cmds;
 
 namespace wind {
 
@@ -175,7 +181,7 @@ private:
 					int opt = valMsg["opt"].asInt();
 					bool result = false;
 					if (g_cmds.count(opt)) {
-						system(g_cmds[opt].c_str());
+						system(g_cmds[opt].cmd.c_str());
 						result = true;
 						EASY_LOG_FILE("main") << "Do cmd succ: " << opt;
 					}
@@ -197,6 +203,31 @@ private:
 					DeliverMsg(msg);
 				}
 				break; 
+				case Msg::MsgType::QueryCmd:
+				{
+					Json::Value valAck;
+					valAck["msgType"] = static_cast<int>(Msg::MsgType::QueryCmdAck);
+					Json::Value& valCmds = valAck["cmds"];
+					for_each(g_cmds.begin(), g_cmds.end(), [this, &valCmds](const pair<int, SCmdData>& cmdPair)->void {
+						auto& cmdData = cmdPair.second;
+
+						Json::Value valCmd;
+						valCmd["opt"] = cmdData.opt;
+						valCmd["info"] = cmdData.info;
+
+						valCmds.append(valCmd);
+					});
+
+					Json::FastWriter writer;
+					string strMsgBody = writer.write(valAck);
+
+					Msg msg;
+					msg.SetBodyLength(strMsgBody.length());
+					memcpy(msg.Body(), strMsgBody.c_str(), msg.BodyLength());
+					msg.EncodeHeader();
+					DeliverMsg(msg);
+				}
+				break;
 				default:
 					break;
 				}
@@ -234,7 +265,7 @@ private:
 
 class Server {
 public:
-	Server()
+	explicit Server(int port)
 		: io_service_()
 		, acceptor_(io_service_)
 		, socket_(io_service_)
@@ -249,7 +280,7 @@ public:
 //#endif // defined(SIGQUIT)
 //		signals_.async_wait(std::bind(&Server::Stop, this));
 
-		tcp::endpoint endpoint(tcp::v4(), 31234);
+		tcp::endpoint endpoint(tcp::v4(), port);
 		acceptor_.open(endpoint.protocol());
 		acceptor_.set_option(tcp::acceptor::reuse_address(true));
 		acceptor_.bind(endpoint);
@@ -277,6 +308,7 @@ public:
 
 		acceptor_.close();
 		room_.StopAll();
+		io_service_.stop();
 	}
 
 	void DeliverMsg(const Msg& msg) { room_.DeliverMsg(msg); }

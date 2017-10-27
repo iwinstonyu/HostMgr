@@ -21,8 +21,8 @@ void PrintUsage() {
 
 void PrintCmd() {
 	EASY_LOG_FILE("main") << "Enter number to choose operation";
-	EASY_LOG_FILE("main") << "1: restart wild";
-	EASY_LOG_FILE("main") << "99: quit";
+	EASY_LOG_FILE("main") << "1: query cmd";
+	EASY_LOG_FILE("main") << "2: quit";
 }
 
 BOOL WINAPI CtrlHandler(DWORD fdwCtrlType)
@@ -164,7 +164,7 @@ int main(int argc, char *argv[])
 					if (!client.LoginOk())
 						break;
 
-					if (input >= 1 && input <= 100)
+					if (input > 0 && input < 100)
 						opt = input;
 					else
 						EASY_LOG_FILE("main") << "Unknown option";
@@ -178,12 +178,14 @@ int main(int argc, char *argv[])
 			if (opt) {
 				bool bQuit = false;
 
-				if (opt > 0 && opt < 99) {
-					client.SendCmd(opt);
+				if (opt == 1) {
+					client.QueryCmd();
 				}
-				else if( opt == 99 ) {
+				else if (opt == 2) {
 					client.Logout();
-					EASY_LOG_FILE("main") << "GoodBye!";
+				}
+				else if (opt >= 10 && opt <= 99) {
+					client.SendCmd(opt);
 				}
 
 				opt = 0;
@@ -192,8 +194,14 @@ int main(int argc, char *argv[])
 			Sleep(100);
 		}
 
+
 		t1.join();
+		EASY_LOG_FILE("main") << "exit t1";
+
 		t2.join();
+		EASY_LOG_FILE("main") << "exit t2";
+
+		EASY_LOG_FILE("main") << "GoodBye!";
 
 		Sleep(1000);
 

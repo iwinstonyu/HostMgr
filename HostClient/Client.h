@@ -73,6 +73,19 @@ public:
 		WriteMsg(msg);
 	}
 
+	bool QueryCmd() {
+		if (!LoginOk()) {
+			EASY_LOG_FILE("main") << "QueryCmd not login";
+			return false;
+		}
+
+		Json::Value val;
+		val["msgType"] = static_cast<int>(Msg::MsgType::QueryCmd);
+		SendJsonMsg(val);
+
+		return true;
+	}
+
 	bool SendCmd(int opt) {
 		if (!LoginOk()) {
 			EASY_LOG_FILE("main") << "SendCmd not login";
@@ -178,34 +191,59 @@ private:
 					continue;
 				}
 
-				switch (valMsg["msgType"].asUInt())
-				{
-				case Msg::MsgType::LoginAck:
-				{
-					if (valMsg["result"].asInt() == 0) {
-						loginState_ = ELoginState::Ok;
-						EASY_LOG_FILE("main") << "Login succ";
+				try {
+					switch (valMsg["msgType"].asUInt())
+					{
+					case Msg::MsgType::LoginAck:
+					{
+						if (valMsg["result"].asInt() == 0) {
+							loginState_ = ELoginState::Ok;
+							EASY_LOG_FILE("main") << "Login succ";
+						}
+						else {
+							loginState_ = ELoginState::Fail;
+							EASY_LOG_FILE("main") << "Login fail";
+						}
 					}
-					else {
-						loginState_ = ELoginState::Fail;
-						EASY_LOG_FILE("main") << "Login fail";
-					}
-				}
-				break;
-				case Msg::MsgType::CmdAck:
-				{
-					if (valMsg["result"].asBool() == true) {
-						EASY_LOG_FILE("main") << "Do cmd succ";
-					}
-					else {
-						EASY_LOG_FILE("main") << "Do cmd fail";
-					}
-				}
-				break;
-				default:
-					EASY_LOG_FILE("main") << "ProcessMsg unknown: " << msgRef->Body();
 					break;
+					case Msg::MsgType::CmdAck:
+					{
+						if (valMsg["result"].asBool() == true) {
+							EASY_LOG_FILE("main") << "Do cmd succ";
+						}
+						else {
+							EASY_LOG_FILE("main") << "Do cmd fail";
+						}
+					}
+					break;
+					case Msg::MsgType::QueryCmdAck:
+					{
+						EASY_LOG_FILE("main") << "============================================================";
+						EASY_LOG_FILE("main") << "Enter number to send cmd: ";
+
+						auto& valCmds = valMsg["cmds"];
+						for (Json::ArrayIndex i = 0; i < valCmds.size(); ++i) {
+							Json::Value& valCmd = valCmds[i];
+
+							EASY_LOG_FILE("main") << valCmd["opt"].asInt() << ": " << valCmd["info"].asString();
+						}
+						EASY_LOG_FILE("main") << "============================================================";
+					}
+					break;
+					default:
+						EASY_LOG_FILE("main") << "ProcessMsg unknown: " << msgRef->Body();
+						break;
+					}
 				}
+				catch (Json::Exception e)
+				{
+					EASY_LOG_FILE("main") << "ProcessMsg exception: " << e.what();
+				}
+				catch (...)
+				{
+					EASY_LOG_FILE("main") << "ProcessMsg exception: unknown";
+				}
+				
 			}
 
 			Sleep(100);

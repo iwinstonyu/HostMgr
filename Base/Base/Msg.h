@@ -36,6 +36,8 @@ public:
 		Logout = 3,
 		Cmd = 4,
 		CmdAck = 5,
+		QueryCmd = 6,
+		QueryCmdAck = 7,
 	};
 
 	Msg() : bodyLength_(0) { memset(data_, 0, sizeof(data_)); }
