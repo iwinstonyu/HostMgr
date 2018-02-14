@@ -136,7 +136,14 @@ public:
 		stop_ = true;
 
 		EASY_LOG_FILE("main") << "Stop client";
-		io_service_.post([this]() { socket_.close(); });
+		io_service_.post([this]() { 
+			if (socket_.is_open()) { 
+				EASY_LOG_FILE("main") << "Close socket"; 
+				boost::system::error_code ec;
+				socket_.shutdown(boost::asio::ip::tcp::socket::shutdown_both, ec);
+				socket_.close(); 
+			} 
+		});
 		connectState_ = EConnectState::None;
 		loginState_ = ELoginState::None;
 		if( runProcessMsg_ )

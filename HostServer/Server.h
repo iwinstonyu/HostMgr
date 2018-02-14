@@ -49,7 +49,7 @@ using boost::asio::ip::tcp;
 
 class Participant {
 public:
-	virtual ~Participant() {}
+	virtual ~Participant() { EASY_LOG_FILE("main") << "Participant destory"; }
 	virtual void Start() = 0;
 	virtual void Stop() = 0;
 	virtual void DeliverMsg(const Msg& msg) = 0;
@@ -99,12 +99,18 @@ public:
 	{
 	}
 
+	~ChatSession() {
+		EASY_LOG_FILE("main") << "ChatSession destory";
+	}
+
 	void Start() {
 		ReadMsgHeader();
 	}
 
 	void Stop() {
 		EASY_LOG_FILE("main") << "Stop Client";
+		boost::system::error_code ec;
+		socket_.shutdown(boost::asio::ip::tcp::socket::shutdown_both, ec);
 		socket_.close();
 	}
 
@@ -306,9 +312,11 @@ public:
 
 		EASY_LOG_FILE("main") << "Server stop";
 
-		acceptor_.close();
-		room_.StopAll();
-		io_service_.stop();
+		io_service_.post([this]() {
+			acceptor_.close();
+			room_.StopAll();
+			io_service_.stop();
+		});
 	}
 
 	void DeliverMsg(const Msg& msg) { room_.DeliverMsg(msg); }
